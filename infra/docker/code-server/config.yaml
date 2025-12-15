@@ -1,0 +1,9 @@
+bind-addr: 0.0.0.0:8080
+auth: none
+password: "etoe"
+extensions-dir: /opt/code-server/extensions
+cert: false
+user-data-dir: /opt/code-server/.config/code-server/data
+disable-telemetry: true
+disable-update-check: true
+proxy-domain: "*"

@@ -1,0 +1,87 @@
+# =============================================================================
+# ZCore Project Dockerfile
+# Extends zcore-base with conda environment for ZCore project
+# =============================================================================
+
+ARG BASE_IMAGE=kingszun/zcore-base:cu129-2512
+FROM ${BASE_IMAGE}
+
+# Build arguments
+ARG CONDA_ENV_NAME=zcore
+ARG PYTHON_VERSION=3.11
+ARG TORCH_VERSION=2.9.1
+ARG CU_VERSION=cu129
+
+# Environment variables
+ENV CONDA_ENV_NAME=${CONDA_ENV_NAME}
+ENV CONDA_DEFAULT_ENV=${CONDA_ENV_NAME}
+
+# =============================================================================
+# Create Conda Environment
+# =============================================================================
+RUN conda create -n ${CONDA_ENV_NAME} python=${PYTHON_VERSION} -y && \
+    conda clean --all -y
+
+# =============================================================================
+# Install PyTorch with CUDA support
+# =============================================================================
+RUN source /opt/conda/bin/activate ${CONDA_ENV_NAME} && \
+    pip install torch==${TORCH_VERSION} torchvision torchaudio --index-url https://download.pytorch.org/whl/${CU_VERSION} && \
+    pip cache purge
+
+# =============================================================================
+# Install FiftyOne and Dependencies
+# =============================================================================
+RUN source /opt/conda/bin/activate ${CONDA_ENV_NAME} && \
+    pip install \
+        fiftyone \
+        numpy \
+        matplotlib \
+        ipython \
+        scipy \
+        scikit-learn \
+        pandas \
+        tqdm \
+        pillow && \
+    pip cache purge
+
+# =============================================================================
+# Install Additional ML/DL Tools
+# =============================================================================
+RUN source /opt/conda/bin/activate ${CONDA_ENV_NAME} && \
+    pip install \
+        timm \
+        transformers \
+        open-clip-torch && \
+    pip cache purge
+
+# =============================================================================
+# Install Visualization & Analysis Tools
+# =============================================================================
+RUN source /opt/conda/bin/activate ${CONDA_ENV_NAME} && \
+    pip install \
+        umap-learn \
+        seaborn \
+        plotly \
+        jupyterlab && \
+    pip cache purge
+
+# =============================================================================
+# Auto-activate conda environment
+# =============================================================================
+RUN echo "conda activate ${CONDA_ENV_NAME}" >> /home/krong/.bashrc
+
+# =============================================================================
+# Conda environment permissions are set correctly by pip install
+# No need to modify permissions
+# =============================================================================
+
+# =============================================================================
+# Set working directory
+# =============================================================================
+WORKDIR /workspace/projects/datacuration/projects/zcore
+
+# =============================================================================
+# Default command
+# =============================================================================
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

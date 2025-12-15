@@ -1,0 +1,38 @@
+# =============================================================================
+# LAVIS (Language-Vision Intelligence Suite) Docker Image
+# Based on VLA Base with LAVIS-specific dependencies
+# =============================================================================
+
+# Build configuration for LAVIS development environment
+ARG CUDA_VERSION="11.8.0"
+ARG CUDNN_VERSION="cudnn8"
+ARG OS_VERSION="ubuntu22.04"
+ARG OS_VERSION_NO_DOT="ubuntu2204"
+ARG CU_VERSION="cu118"
+ARG TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6 8.9 9.0+PTX"
+
+# Use the base image as starting point (built by docker-compose base-cu118-2508 service)
+FROM kingszun/vla-base:cu118-2508 AS lavis
+
+# =============================================================================
+# Environment Setup
+# =============================================================================
+ENV CONDA_ROOT=/opt/conda
+ENV PATH=/opt/conda/bin:$PATH
+ENV CONDA_AUTO_UPDATE_CONDA=false
+ENV CONDA_YES=true
+
+RUN conda create -n lavis python=3.9 -y
+
+# =============================================================================
+# LAVIS Environment Installation
+# =============================================================================
+# Copy LAVIS environment file
+RUN mkdir -p /opt/env/lavis/projects
+COPY projects/lavis /opt/env/lavis/projects/lavis
+
+RUN source activate lavis && \
+    cd /opt/env/lavis/projects/lavis && \
+    python -m pip install -e .
+
+

@@ -1,0 +1,137 @@
+version: '3.8'
+
+# =============================================================================
+# ZCore Docker Configuration
+# =============================================================================
+
+# =============================================================================
+# Build Configuration - CUDA 11.8 + Ubuntu 22.04
+# =============================================================================
+x-common-build-cu118: &common-build-cu118
+  context: ../../
+  dockerfile: infra/docker/dockerfile.base
+  args:
+    TAG: cu118-2512
+    BUILD_DATE: ${DATE}
+    CUDA_VERSION: "11.8.0"
+    CUDNN_VERSION: "cudnn8"
+    CU_VERSION: "cu118"
+    # 7.5: Volta (V100), 8.0: Ampere (A100), 8.6: Ampere (A4000), 8.9: Ada, 9.0: Hopper
+    TORCH_CUDA_ARCH_LIST: "7.5 8.0 8.6 8.9 9.0+PTX"
+    OS_VERSION: "ubuntu22.04"
+    OS_VERSION_NO_DOT: "ubuntu2204"
+    # User configuration
+    USERNAME: krong
+    USER_UID: 1000
+    USER_GID: 1000
+
+# =============================================================================
+# Build Configuration - CUDA 12.9 + Ubuntu 24.04
+# =============================================================================
+x-common-build-cu129: &common-build-cu129
+  context: ../../
+  dockerfile: infra/docker/dockerfile.base
+  args:
+    TAG: cu129-2512
+    BUILD_DATE: ${DATE}
+    CUDA_VERSION: "12.9.1"
+    CUDNN_VERSION: "cudnn"
+    CU_VERSION: "cu129"
+    # 8.0: Ampere (A100), 8.6: Ampere (A4000), 8.9: Ada (RTX 4090), 9.0: Hopper, 10.0: Blackwell
+    TORCH_CUDA_ARCH_LIST: "8.0 8.6 8.9 9.0 10.0+PTX"
+    OS_VERSION: "ubuntu24.04"
+    OS_VERSION_NO_DOT: "ubuntu2404"
+    # User configuration
+    USERNAME: krong
+    USER_UID: 1000
+    USER_GID: 1000
+
+# =============================================================================
+# Common Service Settings
+# =============================================================================
+x-common-settings: &common-settings
+  privileged: true
+  volumes:
+    - /mnt:/mnt
+    - /workspace:/workspace
+    - /var/run/docker.sock:/var/run/docker.sock
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - TERM=xterm-256color
+  network_mode: host
+  shm_size: 32gb
+  runtime: nvidia
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+  stdin_open: true
+  tty: true
+  working_dir: /home/krong
+
+# =============================================================================
+# Service Definition
+# =============================================================================
+services:
+  # CUDA 11.8 + Ubuntu 22.04 (legacy/stable)
+  zcore-base-cu118-2512:
+    image: kingszun/zcore-base:cu118-2512
+    container_name: zcore-base
+    build:
+      <<: *common-build-cu118
+      target: base
+    <<: *common-settings
+
+  # CUDA 12.9 + Ubuntu 24.04 (latest)
+  zcore-base-cu129-2512:
+    image: kingszun/zcore-base:cu129-2512
+    container_name: zcore-base-cu129
+    build:
+      <<: *common-build-cu129
+      target: base
+    <<: *common-settings
+
+  # =============================================================================
+  # ZCore Project Environment (extends base)
+  # =============================================================================
+  # CUDA 12.9 + Ubuntu 24.04 + conda zcore environment
+  zcore-cu129-2512:
+    image: kingszun/zcore:cu129-2512
+    container_name: zcore
+    build:
+      context: ../../
+      dockerfile: infra/docker/dockerfile.zcore
+      args:
+        BASE_IMAGE: kingszun/zcore-base:cu129-2512
+        CONDA_ENV_NAME: zcore
+        PYTHON_VERSION: "3.11"
+        TORCH_VERSION: "2.9.1"
+        CU_VERSION: "cu129"
+    <<: *common-settings
+    working_dir: /workspace/projects/datacuration/projects/zcore
+
+# =============================================================================
+# Usage
+# =============================================================================
+# Build:
+#   docker compose build zcore-base-cu118-2512    # CUDA 11.8 base
+#   docker compose build zcore-base-cu129-2512    # CUDA 12.9 base
+#   docker compose build zcore-cu129-2512         # ZCore project (CUDA 12.9)
+#
+# Run:
+#   docker compose up -d zcore-base-cu118-2512    # CUDA 11.8 base
+#   docker compose up -d zcore-base-cu129-2512    # CUDA 12.9 base
+#   docker compose up -d zcore-cu129-2512         # ZCore project
+#
+# Enter container as krong user:
+#   docker exec -it -u krong zcore bash
+#
+# Enter container as root:
+#   docker exec -it zcore bash
+#
+# Activate conda environment (auto-activated):
+#   conda activate zcore
+# =============================================================================

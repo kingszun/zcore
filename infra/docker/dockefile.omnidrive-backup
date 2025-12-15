@@ -1,0 +1,94 @@
+ARG TAG="cu118-2506"
+ARG CUDA_VERSION="11.8.0"
+ARG CUDNN_VERSION="cudnn8"
+ARG OS_VERSION="ubuntu22.04"
+ARG OS_VERSION_NO_DOT="ubuntu2204"
+ARG CU_VERSION="cu118"
+
+FROM kingszun/vla-base:${TAG} AS omnidrive
+
+ARG CUDA_VERSION="11.8.0"
+ARG CUDNN_VERSION="cudnn8"
+ARG OS_VERSION="ubuntu22.04"
+ARG OS_VERSION_NO_DOT="ubuntu2204"
+ARG CU_VERSION="cu118"
+ARG TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.2 7.5 8.0+PTX 8.6 8.9 9.0"
+
+ARG OMNIDRIVE_TORCH_VERSION="2.0.1"
+ARG OMNIDRIVE_TORCHVISION_VERSION="0.15.2"
+ARG OMNIDRIVE_TORCHAUDIO_VERION="2.0.2"
+ARG XFORMERS_VERION="0.0.21"
+
+
+# Python 3.9 踰꾩쟾 ?ㅼ튂
+RUN conda create -y -n omnidrive python=3.9
+RUN source /opt/conda/bin/activate omnidrive && \
+    python -m pip install --upgrade pip && \
+    python -m pip install setuptools==59.5.0 wheel build uv
+    
+ENV CFLAGS="-std=c++17"
+ENV CXXFLAGS="-std=c++17"
+
+ENV CUDA_HOME=/usr/local/cuda
+ENV FORCE_CUDA="1"
+
+RUN source /opt/conda/bin/activate omnidrive && \
+    python -m pip install \
+        torch==${OMNIDRIVE_TORCH_VERSION} \
+        torchvision==${OMNIDRIVE_TORCHVISION_VERSION} \
+        torchaudio==${OMNIDRIVE_TORCHAUDIO_VERION} \
+        --index-url https://download.pytorch.org/whl/${CU_VERSION}
+        
+# ?꾨줈?앺듃 ?붾젆?좊━ ?앹꽦
+RUN mkdir -p /opt/conda/envs/omnidrive/projects && \
+    chmod -R 755 /opt/conda/envs/omnidrive/projects
+
+RUN source /opt/conda/bin/activate omnidrive && \
+    python -m pip install flash_attn==2.5.3 --no-build-isolation && \
+    python -m pip install transformers==4.31.0
+
+
+## MMcv stage
+ARG MMCV_FULL_VERSION="1.6.2"
+ARG MMDETECTION_VERSION="2.28.2"
+ARG MMSEGMENTATION_VERSION="0.30.0"
+ARG MMDETECTION3D_VERSION="1.0.0rc6"
+
+RUN source /opt/conda/bin/activate omnidrive && \
+    git clone -b v${MMCV_FULL_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmcv.git /opt/conda/envs/omnidrive/projects/mmcv-full && \
+    cd /opt/conda/envs/omnidrive/projects/mmcv-full && \
+    export MMCV_WITH_OPS=1 MMCV_CUDA_ARGS=-std=c++17 && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+## MMDetection stage
+RUN source /opt/conda/bin/activate omnidrive && \
+    git clone -b v${MMDETECTION_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmdetection.git /opt/conda/envs/omnidrive/projects/mmdetection && \
+    cd /opt/conda/envs/omnidrive/projects/mmdetection && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+## MMSegmentation stage
+RUN source /opt/conda/bin/activate omnidrive && \
+    git clone -b v${MMSEGMENTATION_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmsegmentation.git /opt/conda/envs/omnidrive/projects/mmsegmentation && \
+    cd /opt/conda/envs/omnidrive/projects/mmsegmentation && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+## MMDetection3D stage
+RUN source /opt/conda/bin/activate omnidrive && \
+    git clone -b v${MMDETECTION3D_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmdetection3d.git /opt/conda/envs/omnidrive/projects/mmdetection3d && \
+    cd /opt/conda/envs/omnidrive/projects/mmdetection3d && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+
+# Openlane
+RUN source /opt/conda/bin/activate omnidrive && \
+    git clone --no-checkout https://github.com/OpenDriveLab/OpenLane-V2.git /opt/conda/envs/omnidrive/projects/openlane-v2 && \
+    cd /opt/conda/envs/omnidrive/projects/openlane-v2 && \
+    git checkout f085b3dad6bf12e88282e990cbc3704cff226821 && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+
+
+COPY infra/docker/requirements/omnidrive.txt projects/omnidrive/requirements.txt
+RUN source /opt/conda/bin/activate omnidrive && \
+    python -m pip install --no-deps -r projects/omnidrive/requirements.txt
+
+RUN find /opt/conda/envs/omnidrive -type d -print0 | xargs -0 -P$(nproc) -n100 chmod 755 && \
+    find /opt/conda/envs/omnidrive -type f -print0 | xargs -0 -P$(nproc) -n100 chmod 755

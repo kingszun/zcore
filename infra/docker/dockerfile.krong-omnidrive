@@ -1,0 +1,222 @@
+# =============================================================================
+# Krong-OmniDrive Development Environment
+# Enhanced OmniDrive with streaming, distributed training, and production features
+# Optimized for A4000 GPU with CUDA 11.8 and comprehensive development tools
+# =============================================================================
+
+# Build configuration for x86 architecture on M2 Mac
+# Usage: docker buildx build --platform linux/amd64 -f dockerfile.krong-omnidrive -t krong-omnidrive-dev .
+
+ARG TAG="cu118-2509"
+ARG CUDA_VERSION="11.8.0"
+ARG CUDNN_VERSION="cudnn8"
+ARG OS_VERSION="ubuntu22.04"
+ARG OS_VERSION_NO_DOT="ubuntu2204"
+ARG CU_VERSION="cu118"
+
+# =============================================================================
+# Base Image - VLA Base with comprehensive development tools
+# =============================================================================
+# Specify platform for x86 architecture build on M2 Mac
+FROM --platform=linux/amd64 kingszun/vla-base:${TAG} AS krong-omnidrive
+
+# =============================================================================
+# Build Arguments - Krong-OmniDrive Development Configuration
+# =============================================================================
+ARG CUDA_VERSION="11.8.0"
+ARG CUDNN_VERSION="cudnn8"
+ARG OS_VERSION="ubuntu22.04"
+ARG OS_VERSION_NO_DOT="ubuntu2204"
+ARG CU_VERSION="cu118"
+# Optimized CUDA architectures for A4000 and modern GPUs
+# 7.5: Volta (V100), 8.0: Ampere (A100), 8.6: Ampere (A4000), 8.9: Ada, 9.0: Hopper
+ARG TORCH_CUDA_ARCH_LIST="7.5 8.0 8.6 8.9 9.0+PTX"
+
+
+# Development environment settings
+ENV KRONG_OMNIDRIVE_ENV_NAME="krong-omnidrive"
+ENV JUPYTER_PORT="8888"
+ENV TENSORBOARD_PORT="6006"
+ENV MLFLOW_PORT="5000"
+ENV KAFKA_PORT="9092"
+ENV REDIS_PORT="6379"
+ENV PROMETHEUS_PORT="9090"
+ENV GRAFANA_PORT="3000"
+
+# =============================================================================
+# System Dependencies for Krong-OmniDrive
+# =============================================================================
+# Note: Common dependencies are already installed in the base image:
+# - Build tools: build-essential, cmake, pkg-config
+# - Kafka dependencies: librdkafka-dev, libsnappy-dev  
+# - Redis tools: redis-tools
+# - PostgreSQL client: postgresql-client
+# - Networking tools: netcat, dnsutils, iputils-ping
+# - System monitoring: htop, iotop, sysstat
+# No additional system packages needed for Krong-OmniDrive
+
+# =============================================================================
+# Conda Environment Setup
+# =============================================================================
+# Create Krong-OmniDrive conda environment with Python 3.9
+RUN conda create -y -n ${KRONG_OMNIDRIVE_ENV_NAME} python=3.9
+
+# =============================================================================
+# Development Environment Configuration
+# =============================================================================
+# Build environment variables for CUDA and C++
+ENV CFLAGS="-std=c++17"
+ENV CXXFLAGS="-std=c++17"
+ENV CUDA_HOME=/usr/local/cuda
+ENV FORCE_CUDA="1"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Python package management setup
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    python -m pip install --upgrade pip && \
+    python -m pip install setuptools==59.5.0 wheel build
+    # Note: uv is already installed in base image at system level
+
+# =============================================================================
+# PyTorch and Core ML Libraries Installation
+# =============================================================================
+
+# Package versions for Krong-OmniDrive environment
+ARG KRONG_TORCH_VERSION="2.0.1"
+ARG KRONG_TORCHVISION_VERSION="0.15.2"
+ARG KRONG_TORCHAUDIO_VERSION="2.0.2"
+ARG XFORMERS_VERSION="0.0.21"
+
+# Install PyTorch with CUDA support
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    python -m pip install \
+        torch==${KRONG_TORCH_VERSION} \
+        torchvision==${KRONG_TORCHVISION_VERSION} \
+        torchaudio==${KRONG_TORCHAUDIO_VERSION} \
+        --index-url https://download.pytorch.org/whl/${CU_VERSION}
+
+# Install core ML libraries for OmniDrive
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    python -m pip install flash_attn==2.5.3 --no-build-isolation && \
+    python -m pip install transformers==4.31.0 && \
+    python -m pip install xformers==${XFORMERS_VERSION}
+
+# =============================================================================
+# Krong-OmniDrive-Specific Requirements Installation
+# =============================================================================
+
+
+# Create project directories
+RUN mkdir -p /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects && \
+    chmod -R 755 /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects
+
+# =============================================================================
+# Openmmlab Ecosystem Installation (from OmniDrive)
+# =============================================================================
+ARG MMCV_FULL_VERSION="1.6.2"
+ARG MMDETECTION_VERSION="2.28.2"
+ARG MMSEGMENTATION_VERSION="0.30.0"
+ARG MMDETECTION3D_VERSION="1.0.0rc6"
+
+# Install MMCV with CUDA support
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    git clone -b v${MMCV_FULL_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmcv.git /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmcv-full && \
+    cd /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmcv-full && \
+    export MMCV_WITH_OPS=1 MMCV_CUDA_ARGS=-std=c++17 && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+# Install MMDetection for object detection
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    git clone -b v${MMDETECTION_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmdetection.git /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmdetection && \
+    cd /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmdetection && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+# Install MMSegmentation for semantic segmentation
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    git clone -b v${MMSEGMENTATION_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmsegmentation.git /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmsegmentation && \
+    cd /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmsegmentation && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+ 
+# Install MMDetection3D for 3D object detection
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    git clone -b v${MMDETECTION3D_VERSION} --single-branch --depth 1 https://github.com/open-mmlab/mmdetection3d.git /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmdetection3d && \
+    cd /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/mmdetection3d && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+
+# =============================================================================
+# openlane Installation (from OmniDrive)
+# =============================================================================
+
+ARG OPENLANE_VERSION="f085b3dad6bf12e88282e990cbc3704cff226821"
+
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    git clone --no-checkout https://github.com/OpenDriveLab/OpenLane-V2.git /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/OpenLane-V2 && \
+    cd /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/OpenLane-V2 && \
+    git checkout ${OPENLANE_VERSION} && \
+    python -m pip install https://github.com/google/or-tools/releases/download/v9.2/ortools-9.2.9972-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl && \
+    python -m pip install --no-cache-dir --no-build-isolation -v -e .
+
+# =============================================================================
+# Krong-OmniDrive Project Setup
+# =============================================================================
+
+# Copy and install all additional Python packages from requirements file
+COPY infra/docker/requirements/krong-omnidrive.txt /tmp/krong-omnidrive.txt
+RUN source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME} && \
+    python -m pip install --no-deps -r /tmp/krong-omnidrive.txt
+
+
+# =============================================================================
+# Environment Variables for Services
+# =============================================================================
+ENV KAFKA_BOOTSTRAP_SERVERS="localhost:9092"
+ENV REDIS_URL="redis://localhost:6379"
+ENV MLFLOW_TRACKING_URI="http://localhost:5000"
+ENV PROMETHEUS_URL="http://localhost:9090"
+ENV GRAFANA_URL="http://localhost:3000"
+
+# =============================================================================
+# Final Environment Setup and Permissions
+# =============================================================================
+# Set proper permissions for all files
+RUN fdfind --type d -0 . /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME} | \
+    xargs -0 -P$(nproc) -n500 chmod 755 && \
+    fdfind --type f -0 . /opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME} | \
+    xargs -0 -P$(nproc) -n500 chmod 755
+
+# =============================================================================
+# Service Configuration Scripts
+# =============================================================================
+# Create startup script for Krong-OmniDrive services
+RUN echo '#!/bin/bash\n\
+source /opt/conda/bin/activate ${KRONG_OMNIDRIVE_ENV_NAME}\n\
+echo "Starting Krong-OmniDrive Development Environment..."\n\
+echo "Available services:"\n\
+echo "  - Jupyter Lab: http://localhost:${JUPYTER_PORT}"\n\
+echo "  - TensorBoard: http://localhost:${TENSORBOARD_PORT}"\n\
+echo "  - MLflow: http://localhost:${MLFLOW_PORT}"\n\
+echo "  - Code Server: http://localhost:8080"\n\
+echo "  - SSH: port 1111"\n\
+echo ""\n\
+echo "To start individual services:"\n\
+echo "  jupyter lab --ip=0.0.0.0 --port=${JUPYTER_PORT} --no-browser --allow-root"\n\
+echo "  tensorboard --logdir=/opt/conda/envs/${KRONG_OMNIDRIVE_ENV_NAME}/projects/logs --host=0.0.0.0 --port=${TENSORBOARD_PORT}"\n\
+echo "  mlflow ui --host=0.0.0.0 --port=${MLFLOW_PORT}"\n\
+echo ""\n\
+exec "$@"' > /usr/local/bin/krong-start.sh && \
+    chmod +x /usr/local/bin/krong-start.sh
+
+# =============================================================================
+# Port Exposure and Working Directory
+# =============================================================================
+# Expose ports for development services
+EXPOSE ${JUPYTER_PORT} ${TENSORBOARD_PORT} ${MLFLOW_PORT} 8000 8080 9001 1111 \
+       ${KAFKA_PORT} ${REDIS_PORT} ${PROMETHEUS_PORT} ${GRAFANA_PORT}
+
+# =============================================================================
+# Container Startup
+# =============================================================================
+# Default command: start supervisord with development services
+# Services included: SSH (1111), Code Server (8080), Jupyter (8888), TensorBoard (6006), MLflow (5000)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
